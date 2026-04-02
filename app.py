@@ -8,15 +8,14 @@ import yfinance as yf
 st.set_page_config(page_title="IHSG Fund Manager Dashboard", layout="wide")
 st.title("📊 Dashboard Analisis IHSG - ala Fund Manager")
 
-# --- KONEKSI KE SUPABASE (ambil dari secrets Streamlit) ---
+# --- KONEKSI KE SUPABASE ---
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- FUNGSI AMBIL DATA IHSG DARI YAHOO FINANCE ---
+# --- FUNGSI AMBIL DATA IHSG ---
 @st.cache_data(ttl=600)
 def fetch_ihsg_data():
-    """Ambil data IHSG dari Yahoo Finance"""
     ticker = yf.Ticker("^JKSE")
     data = ticker.history(period="1mo", interval="1d")
     if data.empty:
@@ -36,57 +35,47 @@ def save_to_supabase(data):
             'close': row['close'],
             'volume': int(row['volume'])
         }).execute()
-    st.success(f"✅ Data berhasil disimpan! Total {len(data)} baris.")
+    st.success(f"✅ Tersimpan {len(data)} baris.")
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Kontrol Data")
-    if st.button("🔄 Ambil & Simpan Data IHSG Terbaru"):
-        with st.spinner("Mengambil data dari Yahoo Finance..."):
+    if st.button("🔄 Ambil & Simpan Data IHSG"):
+        with st.spinner("Mengambil data..."):
             df_new = fetch_ihsg_data()
             if not df_new.empty:
                 save_to_supabase(df_new)
             else:
-                st.error("Gagal mengambil data. Coba lagi nanti.")
+                st.error("Gagal ambil data.")
 
 # --- MAIN DASHBOARD ---
-st.header("📈 Grafik Pergerakan IHSG")
-
+st.header("📈 Grafik IHSG")
 response = supabase.table('ihsg_prices').select('*').order('timestamp', desc=False).execute()
 
 if response.data:
     df = pd.DataFrame(response.data)
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     
-    # Candlestick chart
     fig = go.Figure(data=[go.Candlestick(
-        x=df['timestamp'],
-        open=df['open'],
-        high=df['high'],
-        low=df['low'],
-        close=df['close']
+        x=df['timestamp'], open=df['open'], high=df['high'],
+        low=df['low'], close=df['close']
     )])
     fig.update_layout(height=500)
     st.plotly_chart(fig, use_container_width=True)
     
-    # Metrik
-    last_price = df['close'].iloc[-1]
-    prev_price = df['close'].iloc[-2]
-    change_pct = ((last_price - prev_price) / prev_price) * 100
-    
+    last = df['close'].iloc[-1]
+    prev = df['close'].iloc[-2]
+    pct = ((last - prev) / prev) * 100
     col1, col2, col3 = st.columns(3)
-    col1.metric("Harga Terakhir", f"{last_price:,.2f}", f"{change_pct:.2f}%")
+    col1.metric("Harga Terakhir", f"{last:,.2f}", f"{pct:.2f}%")
     col2.metric("Tertinggi", f"{df['high'].iloc[-1]:,.2f}")
     col3.metric("Terendah", f"{df['low'].iloc[-1]:,.2f}")
     
-    # Deteksi lonjakan volume (bandarmology sederhana)
-    st.subheader("🔍 Deteksi Aksi Bandar")
-    avg_volume = df['volume'].tail(6).head(5).mean()
-    latest_volume = df['volume'].iloc[-1]
-    
-    if latest_volume > 2 * avg_volume:
-        st.warning(f"⚠️ **Potensi Aksi Bandar!** Volume melonjak {latest_volume/avg_volume:.1f}x dari rata-rata.")
+    avg_vol = df['volume'].tail(6).head(5).mean()
+    latest_vol = df['volume'].iloc[-1]
+    if latest_vol > 2 * avg_vol:
+        st.warning(f"⚠️ Lonjakan volume! {latest_vol/avg_vol:.1f}x")
     else:
-        st.info(f"Volume normal ({latest_volume/avg_volume:.1f}x dari rata-rata 5 hari)")
+        st.info(f"Volume normal ({latest_vol/avg_vol:.1f}x)")
 else:
-    st.info("💡 Data IHSG masih kosong. Klik tombol 'Ambil & Simpan Data IHSG Terbaru' di sidebar.")
+    st.info("Klik tombol di sidebar.")
